@@ -547,6 +547,14 @@ int __darwin_fflush(__darwin_FILE* fp) {
   return fflush(fp->linux_fp);
 }
 
+void __darwin_setlinebuf(__darwin_FILE* fp) {
+  setlinebuf(fp->linux_fp);
+}
+
+int __darwin_setvbuf(__darwin_FILE* fp, char* buf, int mode, size_t size) {
+  return setvbuf(fp->linux_fp, buf, mode, size);
+}
+
 void __darwin_setbuf(__darwin_FILE* fp, char* buf) {
   setbuf(fp->linux_fp, buf);
 }
