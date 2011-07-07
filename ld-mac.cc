@@ -747,7 +747,15 @@ class MachOLoader {
 void MachOLoader::boot(
     uint64_t entry, int argc, char** argv, char** envp) {
 #ifdef __x86_64__
-  __asm__ volatile(" mov %1, %%eax;\n"
+  __asm__ volatile(" mov $0, %%rax;\n"
+                   " mov %3, %%rdx;\n"
+                   " push $0;\n"
+                   ".env_loo:\n"
+                   " push (%%rdx);\n"
+                   " add $8, %%rdx;\n"
+                   " cmp (%%rdx), %%rax;\n"
+                   " jne .env_loo;\n"
+                   " mov %1, %%eax;\n"
                    " mov %2, %%rdx;\n"
                    " push $0;\n"
                    ".loop64:\n"
@@ -762,7 +770,15 @@ void MachOLoader::boot(
                    :"%rax", "%rdx");
   //fprintf(stderr, "done!\n");
 #else
-  __asm__ volatile(" mov %1, %%eax;\n"
+  __asm__ volatile(" mov $0, %%eax;\n"
+                   " mov %3, %%edx;\n"
+                   " push $0;\n"
+                   ".env_loo:\n"
+                   " push (%%edx);\n"
+                   " add $8, %%edx;\n"
+                   " cmp (%%edx), %%eax;\n"
+                   " jne .env_loo;\n"
+                   " mov %1, %%eax;\n"
                    " mov %2, %%edx;\n"
                    " push $0;\n"
                    ".loop32:\n"
