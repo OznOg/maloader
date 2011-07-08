@@ -145,6 +145,17 @@ int __darwin_lstat(const char* path, struct __darwin_stat64* mac) {
   return ret;
 }
 
+/*
+ * FIXME OznOg I don't really know how to implement setruid and setrgid
+ * differently or even if doing else is necessary... */
+int setruid(uid_t ruid) {
+  return setuid(ruid);
+}
+
+int setrgid(gid_t rgid) {
+  return setgid(rgid);
+}
+
 // From /usr/include/sys/dirent.h
 #define __DARWIN_MAXNAMLEN 255
 struct __darwin_dirent {
