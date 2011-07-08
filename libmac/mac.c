@@ -156,6 +156,14 @@ int setrgid(gid_t rgid) {
   return setgid(rgid);
 }
 
+#include <setjmp.h>
+
+/* This needs to be wrapped because the symbol 'sigsetjmp' is actually
+ * a macro to __sigsetjmp() under linux, making the link fail. */
+int __darwin_sigsetjmp(sigjmp_buf env, int savesigs) {
+  return sigsetjmp(env, savesigs);
+}
+
 // From /usr/include/sys/dirent.h
 #define __DARWIN_MAXNAMLEN 255
 struct __darwin_dirent {

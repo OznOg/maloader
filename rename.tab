@@ -79,6 +79,8 @@ RENAME(__tolower, tolower)
 RENAME(opendir$INODE64, opendir)
 RENAME(readdir$INODE64, readdir)
 
+WRAP(sigsetjmp)
+
 WRAP(stat)
 WRAP(fstat)
 WRAP(lstat)
