@@ -1041,6 +1041,10 @@ int __darwin_pthread_rwlockattr_setpshared(pthread_rwlockattr_t* attr,
   pshared = __translate_pshared(pshared);
   return pthread_rwlockattr_setpshared(attr, pshared);
 }
+int __darwin_pthread_atfork(void (*prepare)(void), void (*parent)(void),
+                            void (*child)(void)) {
+  return pthread_atfork(prepare, parent, child);
+}
 
 void* mach_init_routine;
 void* _cthread_init_routine;
