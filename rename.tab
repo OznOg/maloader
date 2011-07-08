@@ -64,6 +64,12 @@ RENAME(_ferror, __darwin_ferror)
 WRAP(fileno)
 WRAP(tmpfile)
 
+WRAP(malloc)
+WRAP(calloc)
+WRAP(realloc)
+WRAP(strdup)
+WRAP(free)
+
 RENAME(__srget, __darwin_fgetc)
 RENAME(__swbuf, __darwin_fputc)
 
