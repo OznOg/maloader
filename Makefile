@@ -77,7 +77,7 @@ ld-mac: ld-mac.o mach-o.o fat.o log.o
 	$(CXX) $^ -o $@ -g -ldl -lpthread $(GCC_EXTRA_FLAGS)
 
 # TODO(hamaji): autotoolize?
-libmac.so: libmac/mac.o libmac/strmode.c
+libmac.so: libmac/mac.o libmac/strmode.o libmac/mem.o
 	$(CC) -shared $^ $(CFLAGS) -o $@ -lcrypto $(GCC_EXTRA_FLAGS)
 
 dist:
