@@ -723,7 +723,7 @@ int __darwin_open(const char* path, int flags, mode_t mode) {
   return open(path, linux_flags, mode);
 }
 
-static char** add_loader_to_argv(char* argv[]) {
+static char** add_loader_to_argv(char* const argv[]) {
   int i, argc;
   for (argc = 0; argv[argc]; argc++);
   LOGF("\n");
@@ -843,7 +843,7 @@ int __darwin_posix_spawn(pid_t* pid,
                          const char* path,
                          const posix_spawn_file_actions_t** file_actions,
                          const posix_spawnattr_t* attrp,
-                         char* argv[],
+                         char* const argv[],
                          char* const envp[]) {
   char** new_argv = add_loader_to_argv(argv);
   const posix_spawn_file_actions_t* fa = NULL;
@@ -861,12 +861,22 @@ int __darwin_posix_spawn(pid_t* pid,
 
 int __darwin_posix_spawnp(pid_t *pid,
                           const char* file,
-                          const posix_spawn_file_actions_t* file_actions,
+                          const posix_spawn_file_actions_t** file_actions,
                           const posix_spawnattr_t* attrp,
                           char* const argv[],
                           char* const envp[]) {
-  err(1, "posix_spawnp is not implemented yet\n");
-  return 0;
+  char** new_argv = add_loader_to_argv(argv);
+  const posix_spawn_file_actions_t* fa = NULL;
+  if (file_actions)
+    fa = *file_actions;
+  int r = posix_spawn(pid,
+                      __loader_path,
+                      fa,
+                      attrp,
+                      new_argv,
+                      envp);
+  free(new_argv);
+  return r;
 }
 
 int __darwin_posix_spawn_file_actions_init(posix_spawn_file_actions_t** p) {
