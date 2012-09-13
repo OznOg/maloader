@@ -67,6 +67,10 @@ WRAP(fileno)
 WRAP(feof)
 WRAP(tmpfile)
 
+WRAP(libintl_setlocale)
+WRAP(libintl_bindtextdomain)
+WRAP(libintl_textdomain)
+
 WRAP(getpwuid)
 
 WRAP(malloc)
