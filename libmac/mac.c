@@ -663,6 +663,13 @@ int __darwin_fileno(__darwin_FILE* fp) {
   return fileno(fp->linux_fp);
 }
 
+#include <stdio_ext.h>
+int __darwin_fpurge(__darwin_FILE *stream)
+{
+  __fpurge(stream->linux_fp);
+  return 0;
+}
+
 __darwin_FILE* __darwin_tmpfile() {
   return __init_darwin_FILE(tmpfile());
 }
