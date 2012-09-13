@@ -574,6 +574,10 @@ int __darwin_fseek(__darwin_FILE* fp, long offset, int whence) {
   return fseek(fp->linux_fp, offset, whence);
 }
 
+int __darwin_feof(__darwin_FILE* fp) {
+  return feof(fp->linux_fp);
+}
+
 long __darwin_ftell(__darwin_FILE* fp) {
   return ftell(fp->linux_fp);
 }

@@ -63,6 +63,7 @@ WRAP(ferror)
 WRAP(fpurge)
 RENAME(_ferror, __darwin_ferror)
 WRAP(fileno)
+WRAP(feof)
 WRAP(tmpfile)
 
 WRAP(getpwuid)
