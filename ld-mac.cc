@@ -225,6 +225,23 @@ static void dumpInt(int bound_name_id) {
   fflush(stdout);
 }
 
+static MachO* loadDylib(string dylib) {
+  static const char executable_str[] = "@executable_path";
+  static const size_t executable_str_len = strlen(executable_str);
+  if (!strncmp(dylib.c_str(), executable_str, executable_str_len)) {
+    string dir = g_darwin_executable_path;
+    size_t found = dir.rfind('/');
+    if (found == string::npos) {
+      dir = ".";
+    } else {
+      dir = dir.substr(0, found);
+    }
+    dylib.replace(0, executable_str_len, dir);
+  }
+
+  return MachO::read(dylib.c_str(), ARCH_NAME);
+}
+
 typedef unordered_map<string, MachO::Export> Exports;
 
 class MachOLoader {
@@ -347,7 +364,7 @@ class MachOLoader {
     for (size_t i = 0; i < segments.size(); i++) {
       Segment* seg = segments[i];
       const char* name = seg->segname;
-      if (!strcmp(name, SEG_PAGEZERO) || !strcmp(name, SEG_LINKEDIT)) {
+      if (!strcmp(name, SEG_PAGEZERO)) {
         continue;
       }
 
@@ -378,10 +395,13 @@ class MachOLoader {
       }
       *base = min(*base, vmaddr);
 
-      intptr vmsize = seg->vmsize;
+      intptr vmsize = alignMem(seg->vmsize, 0x1000);
       LOG << "mmap(file) " << mach.filename() << ' ' << name
           << ": " << (void*)vmaddr << "-" << (void*)(vmaddr + filesize)
           << " offset=" << mach.offset() + seg->fileoff << endl;
+      if (filesize == 0) {
+        continue;
+      }
       void* mapped = mmap((void*)vmaddr, filesize, prot,
                           MAP_PRIVATE | MAP_FIXED,
                           mach.fd(), mach.offset() + seg->fileoff);
@@ -390,11 +410,11 @@ class MachOLoader {
       }
 
       if (vmsize != filesize) {
-        CHECK(vmsize > filesize);
         LOG << "mmap(anon) " << mach.filename() << ' ' << name
             << ": " << (void*)(vmaddr + filesize) << "-"
             << (void*)(vmaddr + vmsize)
             << endl;
+        CHECK(vmsize > filesize);
         void* mapped = mmap((void*)(vmaddr + filesize),
                             vmsize - filesize, prot,
                             MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS,
@@ -473,7 +493,7 @@ class MachOLoader {
         dylib.replace(0, executable_str_len, dir);
       }
 
-      auto_ptr<MachO> dylib_mach(MachO::read(dylib.c_str(), ARCH_NAME));
+      auto_ptr<MachO> dylib_mach(loadDylib(dylib.c_str()));
       load(*dylib_mach);
     }
   }
@@ -481,9 +501,7 @@ class MachOLoader {
   void doBind(const MachO& mach, intptr slide) {
     string last_weak_name = "";
     char* last_weak_sym = NULL;
-    vector<pair<string, char*> >::iterator
-        seen_weak_bind_iter = seen_weak_binds_.begin(),
-        seen_weak_bind_end = seen_weak_binds_.end();
+    size_t seen_weak_bind_index = 0;
     size_t seen_weak_binds_orig_size = seen_weak_binds_.size();
 
     unsigned int common_code_size = (unsigned int)trampoline_.size();
@@ -509,17 +527,30 @@ class MachOLoader {
             sym = last_weak_sym;
           } else {
             last_weak_name = name;
-            if (seen_weak_bind_iter != seen_weak_bind_end &&
-                !strcmp(seen_weak_bind_iter->first.c_str(), name.c_str())) {
-              last_weak_sym = sym = seen_weak_bind_iter->second;
-              seen_weak_bind_iter++;
+            if (seen_weak_bind_index != seen_weak_binds_orig_size &&
+                !strcmp(seen_weak_binds_[seen_weak_bind_index].first.c_str(),
+                        name.c_str())) {
+              last_weak_sym = sym =
+                  seen_weak_binds_[seen_weak_bind_index].second;
+              seen_weak_bind_index++;
             } else {
-              last_weak_sym = (char*)*ptr;
+              if (bind->is_classic) {
+                *ptr = last_weak_sym = (char*)bind->value;
+              } else {
+                const Exports::const_iterator export_found =
+                    exports_.find(bind->name);
+                if (export_found != exports_.end()) {
+                  *ptr = last_weak_sym = (char*)export_found->second.addr;
+                } else {
+                  last_weak_sym = (char*)*ptr;
+                }
+              }
               seen_weak_binds_.push_back(make_pair(name, last_weak_sym));
-              while (seen_weak_bind_iter != seen_weak_bind_end &&
-                     strcmp(seen_weak_bind_iter->first.c_str(),
-                            name.c_str()) <= 0) {
-                seen_weak_bind_iter++;
+              while (seen_weak_bind_index != seen_weak_binds_orig_size &&
+                     strcmp(
+                         seen_weak_binds_[seen_weak_bind_index].first.c_str(),
+                         name.c_str()) <= 0) {
+                seen_weak_bind_index++;
               }
               continue;
             }
@@ -646,9 +677,9 @@ class MachOLoader {
 
     loadDylibs(mach);
 
-    doBind(mach, slide);
-
     loadExports(mach, base, exports);
+
+    doBind(mach, slide);
 
     loadSymbols(mach, slide, base);
   }
@@ -934,7 +965,7 @@ static void* ld_mac_dlopen(const char* filename, int flag) {
   timer.start();
 
   // TODO(hamaji): Handle failures.
-  auto_ptr<MachO> dylib_mach(MachO::read(filename, ARCH_NAME));
+  auto_ptr<MachO> dylib_mach(loadDylib(filename));
 
   MachOLoader* loader = g_loader;
   CHECK(loader);
