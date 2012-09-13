@@ -65,6 +65,8 @@ RENAME(_ferror, __darwin_ferror)
 WRAP(fileno)
 WRAP(tmpfile)
 
+WRAP(getpwuid)
+
 WRAP(malloc)
 WRAP(calloc)
 WRAP(realloc)
