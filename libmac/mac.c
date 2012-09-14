@@ -840,8 +840,16 @@ int __darwin_execlp(const char* file, const char* arg, ...) {
   return 0;
 }
 
-int __darwin_execve(const char* file, char** argv, char** envp) {
-  return __darwin_execvp(file, argv);
+int __darwin_execve(const char *file, char **argv, char** envp) {
+  printf("execve: file=%s\n", file);
+  int argc;
+  for (argc = 0; argv[argc] != NULL; argc++);
+  char **newargv = alloca((argc + 2) * sizeof(char *));
+
+  newargv[0] = __loader_path;
+  memcpy(newargv + 1, argv, (argc + 1) * sizeof(char *));
+
+  return execve(__loader_path, newargv, envp);
 }
 
 int __darwin_execle(const char* file, const char* arg, ...) {
