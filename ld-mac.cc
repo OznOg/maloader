@@ -239,6 +239,19 @@ static MachO* loadDylib(string dylib) {
     dylib.replace(0, executable_str_len, dir);
   }
 
+  static const char loader_path[] = "@loader_path";
+  static const size_t loader_path_len = strlen(loader_path);
+  if (!strncmp(dylib.c_str(), loader_path, loader_path_len)) {
+    string dir = g_darwin_executable_path;
+    size_t found = dir.rfind('/');
+    if (found == string::npos) {
+      dir = ".";
+    } else {
+      dir = dir.substr(0, found);
+    }
+    dylib.replace(0, loader_path_len, dir);
+  }
+
   return MachO::read(dylib.c_str(), ARCH_NAME);
 }
 
@@ -480,33 +493,7 @@ class MachOLoader {
         continue;
       }
 
-      static const char loader_path[] = "@loader_path";
-      static const size_t loader_path_len = strlen(loader_path);
-      if (!strncmp(dylib.c_str(), loader_path, loader_path_len)) {
-        string dir = g_darwin_executable_path;
-        size_t found = dir.rfind('/');
-        if (found == string::npos) {
-          dir = ".";
-        } else {
-          dir = dir.substr(0, found);
-        }
-        dylib.replace(0, loader_path_len, dir);
-      }
-
-      static const char executable_str[] = "@executable_path";
-      static const size_t executable_str_len = strlen(executable_str);
-      if (!strncmp(dylib.c_str(), executable_str, executable_str_len)) {
-        string dir = g_darwin_executable_path;
-        size_t found = dir.rfind('/');
-        if (found == string::npos) {
-          dir = ".";
-        } else {
-          dir = dir.substr(0, found);
-        }
-        dylib.replace(0, executable_str_len, dir);
-      }
-
-      auto_ptr<MachO> dylib_mach(loadDylib(dylib.c_str()));
+      auto_ptr<MachO> dylib_mach(loadDylib(dylib));
       load(*dylib_mach);
     }
   }
@@ -793,6 +780,14 @@ class MachOLoader {
 void MachOLoader::boot(
     uint64_t entry, int argc, char** argv, char** envp) {
 #ifdef __x86_64__
+  // 0x08: argc
+  // 0x10: argv[0]
+  // 0x18: argv[1]
+  //  ...: argv[n]
+  //       0
+  //       envp[0]
+  //       envp[1]
+  //       envp[n]
   __asm__ volatile(" mov $0, %%rax;\n"
                    " mov %3, %%rdx;\n"
                    " push $0;\n"
@@ -803,6 +798,8 @@ void MachOLoader::boot(
                    " jne .env_loo;\n"
                    " mov %1, %%eax;\n"
                    " mov %2, %%rdx;\n"
+                   " push $0;\n"
+                   // TODO(hamaji): envp
                    " push $0;\n"
                    ".loop64:\n"
                    " sub $8, %%rdx;\n"

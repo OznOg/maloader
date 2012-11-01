@@ -92,7 +92,8 @@ RENAME(__tolower, tolower)
 RENAME(fdopen$DARWIN_EXTSN, __darwin_fdopen)
 RENAME(fopen$DARWIN_EXTSN, __darwin_fopen)
 RENAME(opendir$INODE64, opendir)
-RENAME(readdir$INODE64, readdir)
+RENAME(readdir$INODE64, __darwin_readdir64)
+WRAP(readdir)
 
 WRAP(sigsetjmp)
 
@@ -174,3 +175,7 @@ WRAP(uname)
 RENAME(select$1050, select)
 
 WRAP(qsort_r)
+
+WRAP(newlocale)
+
+WRAP(compat_mode)
