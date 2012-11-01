@@ -28,14 +28,12 @@
 #ifndef FAT_H_
 #define FAT_H_
 
+#include "mach-o/fat.h"
+
 #include <map>
 #include <string>
 
-#include "mach-o/fat.h"
-
-using namespace std;
-
 // Reads fd and fill fat info. Returns true if fd is a fat binary.
-bool readFatInfo(int fd, map<string, fat_arch>* fat);
+bool readFatInfo(int fd, std::map<std::string, fat_arch>* fat);
 
 #endif  // FAT_H_

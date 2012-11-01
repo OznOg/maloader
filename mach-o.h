@@ -28,14 +28,12 @@
 #ifndef MACH_O_H_
 #define MACH_O_H_
 
+#include "mach-o/loader.h"
+
 #include <stdint.h>
 
 #include <string>
 #include <vector>
-
-#include "mach-o/loader.h"
-
-using namespace std;
 
 class MachO {
  public:
@@ -58,13 +56,13 @@ class MachO {
   };
 
   struct Export {
-    string name;
+    std::string name;
     uint64_t addr;
     uint32_t flag;
   };
 
   struct Symbol {
-    string name;
+    std::string name;
     uint64_t addr;
   };
 
@@ -74,31 +72,31 @@ class MachO {
   virtual ~MachO() {}
   virtual void close() = 0;
 
-  const string& filename() const { return filename_; }
+  const std::string& filename() const { return filename_; }
 
-  const vector<segment_command_64*>& segments64() const {
+  const std::vector<segment_command_64*>& segments64() const {
     return segments64_;
   }
 
-  const vector<segment_command*>& segments() const {
+  const std::vector<segment_command*>& segments() const {
     return segments_;
   }
 
-  const vector<const char*>& dylibs() const { return dylibs_; }
+  const std::vector<const char*>& dylibs() const { return dylibs_; }
 
-  const vector<Rebase*>& rebases() const { return rebases_; }
+  const std::vector<Rebase*>& rebases() const { return rebases_; }
 
-  const vector<Bind*>& binds() const { return binds_; }
+  const std::vector<Bind*>& binds() const { return binds_; }
 
-  const vector<Export*>& exports() const { return exports_; }
+  const std::vector<Export*>& exports() const { return exports_; }
 
-  const vector<Symbol>& symbols() const { return symbols_; }
+  const std::vector<Symbol>& symbols() const { return symbols_; }
 
   const char* base() const { return base_; }
 
   uint64_t entry() const { return entry_; }
 
-  const vector<uint64_t>& init_funcs() const { return init_funcs_; }
+  const std::vector<uint64_t>& init_funcs() const { return init_funcs_; }
 
   uint64_t dyld_data() const { return dyld_data_; }
 
@@ -108,17 +106,17 @@ class MachO {
   size_t offset() const { return offset_; }
 
  protected:
-  string filename_;
-  vector<segment_command_64*> segments64_;
-  vector<segment_command*> segments_;
-  vector<const char*> dylibs_;
-  vector<Rebase*> rebases_;
-  vector<Bind*> binds_;
-  vector<Export*> exports_;
-  vector<Symbol> symbols_;
+  std::string filename_;
+  std::vector<segment_command_64*> segments64_;
+  std::vector<segment_command*> segments_;
+  std::vector<const char*> dylibs_;
+  std::vector<Rebase*> rebases_;
+  std::vector<Bind*> binds_;
+  std::vector<Export*> exports_;
+  std::vector<Symbol> symbols_;
   const char* base_;
   uint64_t entry_;
-  vector<uint64_t> init_funcs_;
+  std::vector<uint64_t> init_funcs_;
   uint64_t dyld_data_;
   bool is64_;
   int ptrsize_;

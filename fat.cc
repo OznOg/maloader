@@ -30,6 +30,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+using std::string;
+using std::map;
 
 static void fixEndian(uint32_t* p, bool be) {
   if (!be) {

@@ -25,6 +25,8 @@
 // OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 
+#include "mach-o.h"
+
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
@@ -38,8 +40,10 @@
 
 #include "fat.h"
 #include "log.h"
-#include "mach-o.h"
 #include "mach-o/loader.h"
+
+using std::string;
+using std::vector;
 
 DEFINE_bool(READ_SYMTAB,
 #ifdef NDEBUG
@@ -817,9 +821,9 @@ MachO* MachO::read(const char* path, const char* arch, bool need_exports) {
   }
 
   size_t offset = 0, len = 0;
-  map<string, fat_arch> archs;
+  std::map<string, fat_arch> archs;
   if (readFatInfo(fd, &archs)) {
-    map<string, fat_arch>::const_iterator found = archs.find(arch);
+    std::map<string, fat_arch>::const_iterator found = archs.find(arch);
     if (found == archs.end()) {
       fprintf(stderr,
               "%s is a fat binary, but doesn't contain %s binary\n",
