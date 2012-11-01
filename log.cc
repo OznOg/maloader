@@ -27,4 +27,4 @@
 
 #include "env_flags.h"
 
-DEFINE_bool(LOG, false, "Output bunch of logs");
+DEFINE_bool(LOG, true, "Output bunch of logs");

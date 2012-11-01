@@ -31,6 +31,7 @@
 
 #include <dirent.h>
 #include <err.h>
+#include <locale.h>
 #include <pthread.h>
 #include <signal.h>
 #include <spawn.h>
@@ -230,16 +231,43 @@ int __darwin_sigsetjmp(sigjmp_buf env, int savesigs) {
 }
 
 // From /usr/include/sys/dirent.h
+#define __DARWIN_MAXPATHLEN 1024
+struct __darwin_dirent64 {
+  uint64_t d_ino;
+  uint64_t d_seekoff;
+  uint16_t d_reclen;
+  uint16_t d_namlen;
+  uint8_t d_type;
+  char d_name[__DARWIN_MAXPATHLEN];
+};
+
 #define __DARWIN_MAXNAMLEN 255
 struct __darwin_dirent {
-  __darwin_ino64_t d_ino;
+  uint32_t d_ino;
   uint16_t d_reclen;
   uint8_t d_type;
   uint8_t d_namlen;
   char d_name[__DARWIN_MAXNAMLEN + 1];
 };
 
-struct __darwin_dirent* readdir$INODE64(DIR* dirp) {
+struct __darwin_dirent64* __darwin_readdir64(DIR* dirp) {
+  static struct __darwin_dirent64 mac;
+  struct dirent* linux_buf = readdir(dirp);
+  if (!linux_buf) {
+    return NULL;
+  }
+  mac.d_ino = linux_buf->d_ino;
+  mac.d_reclen = linux_buf->d_reclen;
+  mac.d_type = linux_buf->d_type;
+  mac.d_namlen = strlen(linux_buf->d_name);
+  // TODO(hamaji): I hope this won't be used.
+  mac.d_seekoff = 0;
+  strcpy(mac.d_name, linux_buf->d_name);
+  LOGF("readdir64: %s\n", mac.d_name);
+  return &mac;
+}
+
+struct __darwin_dirent* __darwin_readdir(DIR* dirp) {
   static struct __darwin_dirent mac;
   struct dirent* linux_buf = readdir(dirp);
   if (!linux_buf) {
@@ -250,11 +278,24 @@ struct __darwin_dirent* readdir$INODE64(DIR* dirp) {
   mac.d_type = linux_buf->d_type;
   mac.d_namlen = strlen(linux_buf->d_name);
   strcpy(mac.d_name, linux_buf->d_name);
+  LOGF("readdir: %s\n", mac.d_name);
   return &mac;
 }
 
 int __maskrune(__darwin_ct_rune_t _c, unsigned long _f) {
   return _DefaultRuneLocale.__runetype[_c & 0xff] & _f;
+}
+
+int __maskrune_l(__darwin_ct_rune_t _c, unsigned long _f, void* l) {
+  return __maskrune(_c, _f);
+}
+
+size_t mbstowcs_l(wchar_t* pwcs, const char* s, size_t n, void* l) {
+  return mbstowcs(pwcs, s, n);
+}
+
+size_t wcswidth_l(wchar_t* pwcs, size_t n, void* l) {
+  return wcswidth(pwcs, n);
 }
 
 void libiconv_set_relocation_prefix(const char* orig, const char* curr) {
@@ -574,8 +615,24 @@ int __darwin_fseek(__darwin_FILE* fp, long offset, int whence) {
   return fseek(fp->linux_fp, offset, whence);
 }
 
+int __darwin_fseeko(__darwin_FILE *fp, off_t offset, int whence) {
+  return fseeko(fp->linux_fp, offset, whence);
+}
+
+void __darwin_clearerr(__darwin_FILE *stream) {
+  clearerr(stream->linux_fp);
+}
+
+int __darwin_feof(__darwin_FILE* fp) {
+  return feof(fp->linux_fp);
+}
+
 long __darwin_ftell(__darwin_FILE* fp) {
   return ftell(fp->linux_fp);
+}
+
+off_t __darwin_ftello(__darwin_FILE *fp) {
+  return ftello(fp->linux_fp);
 }
 
 void __darwin_rewind(__darwin_FILE* fp) {
@@ -635,6 +692,8 @@ int __darwin_vfprintf(__darwin_FILE* fp, const char* fmt, va_list ap) {
 }
 
 int __darwin_fflush(__darwin_FILE* fp) {
+  if (!fp)
+    return fflush(NULL);
   return fflush(fp->linux_fp);
 }
 
@@ -661,6 +720,13 @@ int __darwin_ferror(__darwin_FILE* fp) {
 
 int __darwin_fileno(__darwin_FILE* fp) {
   return fileno(fp->linux_fp);
+}
+
+#include <stdio_ext.h>
+int __darwin_fpurge(__darwin_FILE *stream)
+{
+  __fpurge(stream->linux_fp);
+  return 0;
 }
 
 __darwin_FILE* __darwin_tmpfile() {
@@ -723,7 +789,7 @@ int __darwin_open(const char* path, int flags, mode_t mode) {
   return open(path, linux_flags, mode);
 }
 
-static char** add_loader_to_argv(char* argv[]) {
+static char** add_loader_to_argv(char* const argv[]) {
   int i, argc;
   for (argc = 0; argv[argc]; argc++);
   LOGF("\n");
@@ -825,9 +891,16 @@ int __darwin_execlp(const char* file, const char* arg, ...) {
   return 0;
 }
 
-int __darwin_execve(const char* file, const char** argv, const char** envp) {
-  err(1, "execve is not implemented yet\n");
-  return 0;
+int __darwin_execve(const char *file, char **argv, char** envp) {
+  printf("execve: file=%s\n", file);
+  int argc;
+  for (argc = 0; argv[argc] != NULL; argc++);
+  char **newargv = alloca((argc + 2) * sizeof(char *));
+
+  newargv[0] = __loader_path;
+  memcpy(newargv + 1, argv, (argc + 1) * sizeof(char *));
+
+  return execve(__loader_path, newargv, envp);
 }
 
 int __darwin_execle(const char* file, const char* arg, ...) {
@@ -843,7 +916,7 @@ int __darwin_posix_spawn(pid_t* pid,
                          const char* path,
                          const posix_spawn_file_actions_t** file_actions,
                          const posix_spawnattr_t* attrp,
-                         char* argv[],
+                         char* const argv[],
                          char* const envp[]) {
   char** new_argv = add_loader_to_argv(argv);
   const posix_spawn_file_actions_t* fa = NULL;
@@ -861,12 +934,22 @@ int __darwin_posix_spawn(pid_t* pid,
 
 int __darwin_posix_spawnp(pid_t *pid,
                           const char* file,
-                          const posix_spawn_file_actions_t* file_actions,
+                          const posix_spawn_file_actions_t** file_actions,
                           const posix_spawnattr_t* attrp,
                           char* const argv[],
                           char* const envp[]) {
-  err(1, "posix_spawnp is not implemented yet\n");
-  return 0;
+  char** new_argv = add_loader_to_argv(argv);
+  const posix_spawn_file_actions_t* fa = NULL;
+  if (file_actions)
+    fa = *file_actions;
+  int r = posix_spawn(pid,
+                      __loader_path,
+                      fa,
+                      attrp,
+                      new_argv,
+                      envp);
+  free(new_argv);
+  return r;
 }
 
 int __darwin_posix_spawn_file_actions_init(posix_spawn_file_actions_t** p) {
@@ -1166,6 +1249,11 @@ void _ZNSt13basic_filebufIcSt11char_traitsIcEE7seekoffExSt12_Ios_SeekdirSt13_Ios
   abort();
 }
 
+void _ZNSi5seekgExSt12_Ios_Seekdir() {
+  fprintf(stderr, "_ZNSi5seekgExSt12_Ios_Seekdir called\n");
+  abort();
+}
+
 void* (*ld_mac_dlopen)(const char* filename, int flag);
 int (*ld_mac_dlclose)(void* handle);
 char* (*ld_mac_dlerror)(void);
@@ -1228,6 +1316,68 @@ void __darwin_qsort_r(void* base, size_t nel, size_t width, void* thunk,
   ctx.compar = compar;
   ctx.thunk = thunk;
   qsort_r(base, nel, width, &__darwin_qsort_r_helper, &ctx);
+}
+
+unsigned int arc4random() {
+  static int initialized = 0;
+  if (!initialized) {
+    srand(time(NULL));
+    initialized = 1;
+  }
+  return rand();
+}
+
+#define __DARWIN_LC_ALL_MASK            (  __DARWIN_LC_COLLATE_MASK \
+                                         | __DARWIN_LC_CTYPE_MASK \
+                                         | __DARWIN_LC_MESSAGES_MASK \
+                                         | __DARWIN_LC_MONETARY_MASK \
+                                         | __DARWIN_LC_NUMERIC_MASK \
+                                         | __DARWIN_LC_TIME_MASK )
+#define __DARWIN_LC_COLLATE_MASK        (1 << 0)
+#define __DARWIN_LC_CTYPE_MASK          (1 << 1)
+#define __DARWIN_LC_MESSAGES_MASK       (1 << 2)
+#define __DARWIN_LC_MONETARY_MASK       (1 << 3)
+#define __DARWIN_LC_NUMERIC_MASK        (1 << 4)
+#define __DARWIN_LC_TIME_MASK           (1 << 5)
+
+locale_t __darwin_newlocale(int category_mask, const char* locale,
+                            locale_t base) {
+  LOGF("newlocale: %d %p %p\n", category_mask, locale, base);
+  int linux_category_mask = 0;
+  if (__DARWIN_LC_COLLATE_MASK & category_mask)
+    linux_category_mask |= LC_COLLATE_MASK;
+  if (__DARWIN_LC_CTYPE_MASK & category_mask)
+    linux_category_mask |= LC_CTYPE_MASK;
+  if (__DARWIN_LC_MESSAGES_MASK & category_mask)
+    linux_category_mask |= LC_MESSAGES_MASK;
+  if (__DARWIN_LC_MONETARY_MASK & category_mask)
+    linux_category_mask |= LC_MONETARY_MASK;
+  if (__DARWIN_LC_NUMERIC_MASK & category_mask)
+    linux_category_mask |= LC_NUMERIC_MASK;
+  if (__DARWIN_LC_TIME_MASK & category_mask)
+    linux_category_mask |= LC_TIME_MASK;
+  // Apple's newlocale allows base=LC_GLOBAL_LOCALE, while glibc crashes.
+  // It seems the behavior is unspecified for this case.
+  // http://pubs.opengroup.org/onlinepubs/9699919799/functions/newlocale.html
+  // We'll use current locale (NULL) instead of the global locale.
+  if (base == LC_GLOBAL_LOCALE)
+    base = NULL;
+  // It seems the following 5 locales are the same as "C" for Mac.
+  if (!strcmp(locale, "en_US") ||
+      !strcmp(locale, "en_US.ISO8859-1") ||
+      !strcmp(locale, "en_US.ISO8859-15") ||
+      !strcmp(locale, "en_US.US-ASCII") ||
+      !strcmp(locale, "en_US.UTF-8"))
+    locale = "C";
+  return newlocale(linux_category_mask, locale, base);
+}
+
+int __darwin_compat_mode(const char* function, const char* mode) {
+  LOGF("compat_mode: %s %s\n", function, mode);
+  // We don't consider bootstrap, legacy, and error.
+  // http://opensource.apple.com/source/Libc/Libc-763.13/gen/get_compat.c
+  // TODO(hamaji): Support binary operators.
+  return !strcasecmp(mode, "unix2003");
 }
 
 __attribute__((constructor)) void initMac() {

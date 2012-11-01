@@ -28,6 +28,8 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+#include <stdarg.h>
 
 /**
  * BSD provides extra memory manipulation functions such as malloc_size which
@@ -105,6 +107,32 @@ char *__darwin_strdup(const char *s)
   memcpy(data, s, strlen(s));
 
   return data;
+}
+
+int __darwin_vasprintf(char **strp, const char *fmt, va_list ap)
+{
+  va_list aq;
+  va_copy(aq, ap);
+  /* snprintf has the ability to tell how many byte WOULD HAVE BEEN written
+   * if the buffer was not too small. Thus here, I use this trick to know the
+   * amount of memory that is needed to be allocated.
+   * Passing 0 for size afford that no byte will be written */
+  int len = vsnprintf(NULL, 0, fmt, aq);
+  va_end(aq);
+
+  /* Alloc enougth space */
+  *strp = __darwin_malloc(len + 1);
+
+  return vsnprintf(*strp, len + 1, fmt, ap);
+}
+
+int __darwin_asprintf(char **strp, const char *fmt, ...) {
+  int err;
+  va_list argp;
+  va_start(argp, fmt);
+  err = __darwin_vasprintf(strp, fmt, argp);
+  va_end(argp);
+  return err;
 }
 
 void __darwin_free(void *ptr) {
