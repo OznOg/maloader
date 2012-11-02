@@ -914,7 +914,7 @@ static void initSignalHandler() {
 }
 
 static bool loadLibMac(const char* mypath) {
-  if (dlopen("libmac.so", RTLD_LAZY | RTLD_GLOBAL)) {
+  if (dlopen("libmac/libmac.so", RTLD_LAZY | RTLD_GLOBAL)) {
     return true;
   }
 

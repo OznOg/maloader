@@ -29,6 +29,8 @@ add_executable(
 	include/mach/machine.h
 	)
 
+add_subdirectory(libmac)
+
 target_link_libraries(
 	ld-mac
 	dl
