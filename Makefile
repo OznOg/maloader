@@ -2,7 +2,13 @@ VERSION=0.4
 BITS=64
 
 GCC_EXTRA_FLAGS=-m$(BITS)
-GCCFLAGS=-g -Iinclude -Wall -MMD -fno-omit-frame-pointer -O $(GCC_EXTRA_FLAGS)
+GCCFLAGS+=-g -Iinclude -Wall -MMD -fno-omit-frame-pointer -O $(GCC_EXTRA_FLAGS)
+ifeq ($(USE_LIBCXX), 1)
+GCCFLAGS+=-stdlib=libc++ -DUSE_LIBCXX
+CXX_LDFLAGS+=-lc++ -lsupc++
+CC=clang
+CXX=clang++
+endif
 CXXFLAGS=$(GCCFLAGS) -W -Werror
 CFLAGS=$(GCCFLAGS) -fPIC
 
@@ -73,17 +79,17 @@ $(MACTXTS): %.txt: %.bin
 #	touch $@
 
 extract: extract.o fat.o
-	$(CXX) $^ -o $@ -g -I. -W -Wall $(GCC_EXTRA_FLAGS)
+	$(CXX) $^ -o $@ -g -I. -W -Wall $(GCC_EXTRA_FLAGS) $(CXX_LDFLAGS)
 
 macho2elf: macho2elf.o mach-o.o fat.o log.o
-	$(CXX) $^ -o $@ -g $(GCC_EXTRA_FLAGS)
+	$(CXX) $^ -o $@ -g $(GCC_EXTRA_FLAGS) $(CXX_LDFLAGS)
 
 ld-mac: ld-mac.o mach-o.o fat.o log.o
-	$(CXX) $^ -o $@ -g -ldl -lpthread $(GCC_EXTRA_FLAGS)
+	$(CXX) -v $^ -o $@ -g -ldl -lpthread $(GCC_EXTRA_FLAGS) $(CXX_LDFLAGS)
 
 # TODO(hamaji): autotoolize?
 libmac.so: libmac/mac.o libmac/strmode.o libmac/mem.o libmac/pwd.o libmac/libintl.o
-	$(CC) -shared $^ $(CFLAGS) -o $@ -lcrypto $(GCC_EXTRA_FLAGS)
+	$(CC) -shared $^ $(CFLAGS) -o $@ $(GCC_EXTRA_FLAGS) $(LDFLAGS)
 
 dist:
 	cd /tmp && rm -fr maloader-$(VERSION) && git clone git@github.com:shinh/maloader.git && rm -fr maloader/.git && mv maloader maloader-$(VERSION) && tar -cvzf maloader-$(VERSION).tar.gz maloader-$(VERSION)

@@ -43,6 +43,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/utsname.h>
+#include <sys/vfs.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -282,6 +283,67 @@ struct __darwin_dirent* __darwin_readdir(DIR* dirp) {
   return &mac;
 }
 
+// From /usr/include/sys/mount.h
+#define __DARWIN_MFSNAMELEN 15
+#define __DARWIN_MFSTYPENAMELEN 16
+// assume __DARWIN_64_BIT_INO_T is false.
+#define __DARWIN_MNAMELEN 90
+struct __darwin_fsid { int32_t val[2]; };
+
+struct __darwin_statfs64 {
+  uint32_t f_bsize;
+  int32_t  f_iosize;
+  uint64_t f_blocks;
+  uint64_t f_bfree;
+  uint64_t f_bavail;
+  uint64_t f_files;
+  uint64_t f_ffree;
+  struct __darwin_fsid   f_fsid;
+  __darwin_uid_t    f_owner;
+  uint32_t f_type;
+  uint32_t f_flags;
+  uint32_t f_fssubtype;
+  char     f_fstypename[__DARWIN_MFSTYPENAMELEN];
+  char     f_mntonname[__DARWIN_MAXPATHLEN];
+  char     f_mntfromname[__DARWIN_MAXPATHLEN];
+  uint32_t f_reserved[8];
+};
+
+static void __translate_statfs64(struct statfs64* linux_buf,
+                                 struct __darwin_statfs64* mac) {
+  memset(mac, 0, sizeof(*mac));
+  mac->f_iosize = linux_buf->f_bsize;
+  mac->f_blocks = linux_buf->f_blocks;
+  mac->f_bfree = linux_buf->f_bfree;
+  mac->f_bavail = linux_buf->f_bavail;
+  mac->f_files = linux_buf->f_files;
+  mac->f_ffree = linux_buf->f_ffree;
+  mac->f_type = linux_buf->f_type;
+
+  memcpy(&mac->f_fsid, &linux_buf->f_fsid, sizeof(mac->f_fsid));
+  // Followings are just ignored:
+  // f_bsize, f_owner, f_flags, f_fssubtype, f_fstypename, f_mntonname,
+  // f_mntfromname.
+}
+
+int __darwin_statfs64(const char* path, struct __darwin_statfs64* mac) {
+  LOGF("statfs64: path=%s buf=%p\n", path, mac);
+  struct statfs64 linux_buf;
+  int ret = statfs64(path, &linux_buf);
+  if (ret == 0)
+    __translate_statfs64(&linux_buf, mac);
+  return ret;
+}
+
+int __darwin_fstatfs64(int fd, struct __darwin_statfs64* mac) {
+  LOGF("fstatfs64: fd=%d buf=%p\n", fd, mac);
+  struct statfs64 linux_buf;
+  int ret = fstatfs64(fd, &linux_buf);
+  if (ret == 0)
+    __translate_statfs64(&linux_buf, mac);
+  return ret;
+}
+
 int __maskrune(__darwin_ct_rune_t _c, unsigned long _f) {
   return _DefaultRuneLocale.__runetype[_c & 0xff] & _f;
 }
@@ -390,7 +452,7 @@ int mach_port_deallocate() {
   return 0;
 }
 
-/* FIXME implement vm_function corectly.
+/* FIXME implement vm_function correctly.
  * OznOg Obviosly, all this remain completelly wrong because completely void.
  * This functions allow programs to start correctly and usually to run (almost)
  * correctly, but the memory managment remains wrong. I do not really have good ideas
@@ -731,6 +793,19 @@ int __darwin_fpurge(__darwin_FILE *stream)
 
 __darwin_FILE* __darwin_tmpfile() {
   return __init_darwin_FILE(tmpfile());
+}
+
+static __thread char* g_fgetln_buf;
+char* __darwin_fgetln(__darwin_FILE* fp, size_t* len) {
+  free(g_fgetln_buf);
+  g_fgetln_buf = malloc(4096);
+  fgets(g_fgetln_buf, 4096, fp->linux_fp);
+  *len = strlen(g_fgetln_buf);
+  if (*len >= 4095) {
+    fprintf(stderr, "Insufficient buffer size in fgetln\n");
+    abort();
+  }
+  return g_fgetln_buf;
 }
 
 char __darwin_executable_path[PATH_MAX];
@@ -1080,9 +1155,27 @@ void __darwin___cxa_throw(char** obj) {
 }
 
 size_t strlcpy(char* dst, const char* src, size_t size) {
-  dst[size - 1] = '\0';
-  strncpy(dst, src, size - 1);
-  return strlen(dst);
+  LOGF("strlcpy: dst=%p src=%p size=%zu\n", dst, src, size);
+  size_t src_size = strlen(src) + 1;  // +1 for '\0'
+  LOGF("strlcpy: len(src)=%zu\n", src_size);
+  if (size != 0) {
+    // We don't use strncpy because strncpy is slow if |size| is
+    // much larger than strlen(|src|) e.g. 16K bytes vs 64 bytes.
+    //
+    // The reason of this is explained by glibc's man:
+    //
+    // If the length of src is less than n, strncpy() writes additional
+    // null bytes to dest to ensure that a total of n bytes are written.
+    //
+    // Also, we already know the length of |src|, we can use memcpy.
+    if (src_size < size)
+      size = src_size;
+    dst[size - 1] = '\0';
+    memcpy(dst, src, size - 1);
+  }
+  // According to the strlcpy(3) manual, the length of |src| is always returned.
+  // https://developer.apple.com/library/mac/#documentation/darwin/reference/manpages/man3/strlcpy.3.html
+  return src_size - 1;
 }
 
 size_t strlcat(char* dst, const char* src, size_t size) {
@@ -1170,7 +1263,7 @@ void* malloc_default_zone() {
 
 void malloc_zone_statistics(void* zone, __darwin_malloc_statistics_t* stats) {
   fprintf(stderr, "malloc_zone_statistics\n");
-  memset(stats, 0, sizeof(stats));
+  memset(stats, 0, sizeof(*stats));
 }
 
 int task_get_exception_ports() {
@@ -1380,10 +1473,63 @@ int __darwin_compat_mode(const char* function, const char* mode) {
   return !strcasecmp(mode, "unix2003");
 }
 
+int32_t OSAtomicAdd32(int32_t theAmount, volatile int32_t *theValue) {
+  return __sync_fetch_and_add(theValue, theAmount);
+}
+
+int32_t OSAtomicAdd64(int64_t theAmount, volatile int64_t *theValue) {
+  return __sync_fetch_and_add(theValue, theAmount);
+}
+
 __attribute__((constructor)) void initMac() {
   __darwin_stdin = __init_darwin_FILE(stdin);
   __darwin_stdout = __init_darwin_FILE(stdout);
   __darwin_stderr = __init_darwin_FILE(stderr);
   mach_init_routine = &do_nothing;
   _cthread_init_routine = &do_nothing;
+}
+
+#define __DARWIN_PTHREAD_MUTEX_SIG_init              0x32AAABA7
+#define __DARWIN_PTHREAD_ERRORCHECK_MUTEX_SIG_init   0x32AAABA1
+#define __DARWIN_PTHREAD_RECURSIVE_MUTEX_SIG_init    0x32AAABA2
+#define __DARWIN_PTHREAD_FIRSTFIT_MUTEX_SIG_init     0x32AAABA3
+
+#define __DARWIN_PTHREAD_MUTEX_SIZE     56
+struct __darwin_pthread_mutex_t {
+  long sig;
+  char opaque[__DARWIN_PTHREAD_MUTEX_SIZE];
+};
+
+int __darwin_pthread_mutex_lock(struct __darwin_pthread_mutex_t *mutex) {
+  // convert pthread_mutex_t initialized by Mac's PTHREAD_MUTEX_INITIALIZER to
+  // that of Linux.
+  if (mutex->sig ==__DARWIN_PTHREAD_MUTEX_SIG_init) {
+    pthread_mutex_t expected_value = PTHREAD_MUTEX_INITIALIZER;
+    memcpy(mutex, &expected_value, sizeof(expected_value));
+  } else if (mutex->sig ==__DARWIN_PTHREAD_ERRORCHECK_MUTEX_SIG_init) {
+    pthread_mutex_t expected_value = PTHREAD_ERRORCHECK_MUTEX_INITIALIZER_NP;
+    memcpy(mutex, &expected_value, sizeof(expected_value));
+  } else if (mutex->sig ==__DARWIN_PTHREAD_RECURSIVE_MUTEX_SIG_init) {
+    pthread_mutex_t expected_value = PTHREAD_ERRORCHECK_MUTEX_INITIALIZER_NP;
+    memcpy(mutex, &expected_value, sizeof(expected_value));
+  } else if (mutex->sig ==__DARWIN_PTHREAD_FIRSTFIT_MUTEX_SIG_init) {
+    pthread_mutex_t expected_value = PTHREAD_ADAPTIVE_MUTEX_INITIALIZER_NP;
+    memcpy(mutex, &expected_value, sizeof(expected_value));
+  }
+  return pthread_mutex_lock((pthread_mutex_t*)mutex);
+}
+
+// Dummy implementation of Block.
+void * _NSConcreteStackBlock[32] = { 0 };
+void *_Block_copy(const void *arg) {
+  // ugly but seems to work.
+  return (void*)(arg);
+}
+void _Block_release(const void *arg) {
+}
+
+// Dummy implementation of __cxa_demangle.
+char* __cxa_demangle(const char* mangled_name, char* output_buffer,
+                     size_t* length, int* status) {
+  return NULL;  // Always fails.
 }

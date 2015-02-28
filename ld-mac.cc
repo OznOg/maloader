@@ -42,14 +42,20 @@
 #include <sys/mman.h>
 #include <time.h>
 #include <ucontext.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <iostream>
 #include <map>
 #include <set>
 #include <string>
-#include <tr1/unordered_map>
 #include <vector>
+
+#ifdef USE_LIBCXX
+#include <unordered_map>
+#else
+#include <tr1/unordered_map>
+#endif
 
 #include "env_flags.h"
 #include "fat.h"
@@ -57,7 +63,9 @@
 #include "mach-o.h"
 
 using namespace std;
+#ifndef USE_LIBCXX
 using namespace std::tr1;
+#endif
 
 DEFINE_bool(TRACE_FUNCTIONS, false, "Show calling functions");
 DEFINE_bool(PRINT_TIME, false, "Print time spent in this loader");
@@ -277,13 +285,15 @@ class MachOLoader {
  public:
   MachOLoader()
     : last_addr_(0) {
-    dylib_to_so_.insert(make_pair(
-                          "/System/Library/Frameworks/CoreFoundation.framework"
-                          "/Versions/A/CoreFoundation",
-                          "libCoreFoundation.so"));
-    dylib_to_so_.insert(make_pair(
-                          "/usr/lib/libncurses.5.4.dylib",
-                          "libncurses.so"));
+    dylib_to_so_["/System/Library/Frameworks/CoreFoundation.framework"
+                 "/Versions/A/CoreFoundation"].push_back(
+                     "libCoreFoundation.so");
+
+    // From Xcode 5.1, clang requires libncurses. However, since libncurses.so
+    // looks a linker script (at least ubuntu 12.04), we cannot dlopen it.
+    // We need to load libtinfo.so and libncurses.so.5 both.
+    dylib_to_so_["/usr/lib/libncurses.5.4.dylib"].push_back("libtinfo.so");
+    dylib_to_so_["/usr/lib/libncurses.5.4.dylib"].push_back("libncurses.so.5");
 
     symbol_to_so_.insert(make_pair("uuid_clear", "libuuid.so"));
     symbol_to_so_.insert(make_pair("uuid_compare", "libuuid.so"));
@@ -298,6 +308,11 @@ class MachOLoader {
     symbol_to_so_.insert(make_pair("uuid_unparse", "libuuid.so"));
     symbol_to_so_.insert(make_pair("uuid_unparse_lower", "libuuid.so"));
     symbol_to_so_.insert(make_pair("uuid_unparse_upper", "libuuid.so"));
+
+    symbol_to_so_.insert(make_pair("MD5", "libcrypto.so"));
+    symbol_to_so_.insert(make_pair("MD5_Final", "libcrypto.so"));
+    symbol_to_so_.insert(make_pair("MD5_Init", "libcrypto.so"));
+    symbol_to_so_.insert(make_pair("MD5_Update", "libcrypto.so"));
 
     if (FLAGS_TRACE_FUNCTIONS) {
       // Push all arguments into stack.
@@ -477,12 +492,15 @@ class MachOLoader {
       if (!loaded_dylibs_.insert(dylib).second)
         continue;
 
-      const string so = dylib_to_so_[dylib];
-      if (!so.empty()) {
-        LOG << "Loading " << so << " for " << dylib << endl;
-        if (!dlopen(so.c_str(), RTLD_LAZY | RTLD_GLOBAL)) {
-          fprintf(stderr, "Couldn't load %s for %s\n",
-                  so.c_str(), dylib.c_str());
+      if (dylib_to_so_.count(dylib)) {
+        const vector<string>& sos = dylib_to_so_[dylib];
+        for (size_t i = 0; i < sos.size(); ++i) {
+          const string& so = sos[i];
+          LOG << "Loading " << so << " for " << dylib << endl;
+          if (!dlopen(so.c_str(), RTLD_LAZY | RTLD_GLOBAL)) {
+            fprintf(stderr, "Couldn't load %s for %s: %s\n",
+                    so.c_str(), dylib.c_str(), dlerror());
+          }
         }
       }
 
@@ -588,8 +606,8 @@ class MachOLoader {
                 if (dlopen(iter->second.c_str(), RTLD_LAZY | RTLD_GLOBAL)) {
                   sym = (char*)dlsym(RTLD_DEFAULT, name.c_str());
                 } else {
-                  fprintf(stderr, "Couldn't load %s for %s\n",
-                          iter->second.c_str(), name.c_str());
+                  fprintf(stderr, "Couldn't load %s for %s: %s\n",
+                          iter->second.c_str(), name.c_str(), dlerror());
                 }
               }
             }
@@ -734,7 +752,13 @@ class MachOLoader {
     LOG << "booting from " << (void*)mach.entry() << "..." << endl;
     fflush(stdout);
     CHECK(argc > 0);
-    boot(mach.entry(), argc, argv, envp);
+
+    if (mach.is_lc_main_entry()) {
+      uint64_t entry = mach.entry() + mach.text_base();
+      exit(((int (*)(int, char**, char**))entry)(argc, argv, envp));
+    } else {
+      boot(mach.entry(), argc, argv, envp);
+    }
     /*
       int (*fp)(int, char**, char**) =
       (int(*)(int, char**, char**))mach.entry();
@@ -744,6 +768,8 @@ class MachOLoader {
   }
 
  private:
+  // Because .loop64 cannot be redefined.
+  __attribute__((noinline))
   void boot(uint64_t entry, int argc, char** argv, char** envp);
 
   void pushTrampolineCode(unsigned int c) {
@@ -772,7 +798,7 @@ class MachOLoader {
   vector<uint64_t> init_funcs_;
   Exports exports_;
   vector<pair<string, char*> > seen_weak_binds_;
-  map<string, string> dylib_to_so_;
+  map<string, vector<string> > dylib_to_so_;
   map<string, string> symbol_to_so_;
   set<string> loaded_dylibs_;
 };
